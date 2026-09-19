@@ -15,4 +15,6 @@ print(f"model loaded in {time.time() - t0:.1f}s")
 segments, info = model.transcribe(str(AUDIO), language="en")
 print(info.language, info.duration)
 for s in segments:
+
+    
     print(f"[{s.start:.2f} -> {s.end:.2f}] {s.text}")
