@@ -19,9 +19,11 @@
 
 | 文件 | 作用 |
 |---|---|
+| `demo_readme.md` | 项目说明：相对上游改了什么、实验结果、下一步方向 |
 | `demo.py` | 最小示例，识别仓库自带的英文 `tests/data/jfk.flac`，用来验证环境 |
 | `transcribe.py` | 转写任意音频/视频，不需要标准答案；支持 `--srt` 输出字幕 |
 | `eval_zh.py` | 正式评测：给定音频和标准答案，计算 CER 字错率，对比多个模型 |
+| `prompts.py` | initial_prompt 词表（通用中文 / 技术场景），用 `--prompt-name` 调用 |
 | `samples/` | 测试素材（个人录音 `my_audio.mp3` 已被 gitignore，不会上传） |
 | `reports/` | 每次评测的归档报告（带时间戳，不互相覆盖） |
 | `eval_report.md` | 最新一次评测结果（每次运行被覆盖） |
@@ -43,7 +45,7 @@ CER = (替换 + 删除 + 插入) / 标准答案字数
 | faster-whisper-tiny | 37.5% | 28.1% |
 | faster-whisper-small | 28.8% | **10.4%** |
 
-（真实录音 `my_audio.mp3`，30 秒，108 字）
+（真实录音 `my_audio.mp3`，约 25 秒，去标点后 104 字）
 
 ## 实验记录
 

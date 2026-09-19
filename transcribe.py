@@ -56,8 +56,17 @@ def main():
     parser.add_argument("--device", default="cpu", help="cpu 或 cuda")
     parser.add_argument("--compute-type", default="int8", help="int8 / float16 / int8_float16")
     parser.add_argument("--prompt", default=None, help="initial_prompt，可放专有名词表")
+    parser.add_argument("--prompt-name", default=None, help="prompts.py 里预置的词表名，如 zh / tech")
     parser.add_argument("--srt", action="store_true", help="同时输出 .srt 字幕文件")
     args = parser.parse_args()
+
+    if args.prompt_name:
+        from prompts import PROMPTS
+
+        if args.prompt_name not in PROMPTS:
+            print(f"[错误] 没有名为 {args.prompt_name} 的词表。可用: {', '.join(PROMPTS)}")
+            return
+        args.prompt = PROMPTS[args.prompt_name]
 
     files = collect_files(args.paths)
     if not files:

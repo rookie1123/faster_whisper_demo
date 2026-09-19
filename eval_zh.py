@@ -118,7 +118,16 @@ def main():
         help="要对比的模型目录名（models 目录下）",
     )
     parser.add_argument("--prompt", default=None, help="可选的 initial_prompt")
+    parser.add_argument("--prompt-name", default=None, help="prompts.py 里预置的词表名，如 zh / tech")
     args = parser.parse_args()
+
+    if args.prompt_name:
+        from prompts import PROMPTS
+
+        if args.prompt_name not in PROMPTS:
+            print(f"[错误] 没有名为 {args.prompt_name} 的词表。可用: {', '.join(PROMPTS)}")
+            return
+        args.prompt = PROMPTS[args.prompt_name]
 
     audio_path = Path(args.audio)
     if not audio_path.is_absolute():
