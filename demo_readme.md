@@ -54,6 +54,7 @@ uv venv .venv --python 3.12 --seed
 | `demo.py` | 最小示例，识别英文测试音频 | 新人 clone 下来先跑这个，确认环境没问题 |
 | `EXPERIMENTS.md` | 实验记录：环境、方法、结论、复现步骤 | 让实验结论脱离聊天记录独立存在 |
 | `demo_readme.md` | 本文件 | 说明本项目相对上游做了什么 |
+| `COLLABORATION.md` | 协作指南：环境准备、分支流程、PR 清单、冲突处理 | 新人上手的第一个摩擦点不是写代码，而是环境和流程 |
 | `samples/` | 测试素材（2 段合成音频 + 标准答案） | 让任何人 clone 下来都能立刻复现评测，不必先自己录音 |
 | `reports/` | 每次评测的时间戳归档 | 实验历史不再互相覆盖 |
 | `.gitignore` | 排除 `.venv/`、`models/`、个人录音、派生字幕 | 仓库只放"人与人需要共享的东西"，机器生成的一律不入库 |
@@ -132,6 +133,7 @@ faster-whisper/
 ├── tests/ benchmark/ docker/  # 上游测试与基准（未修改）
 ├── README.md                # 上游原始说明（保留）
 ├── demo_readme.md           # 本文件
+├── COLLABORATION.md         # 协作指南（队友先读这个）
 ├── EXPERIMENTS.md           # 实验记录
 ├── demo.py                  # 环境自检
 ├── transcribe.py            # 转写工具（支持 --srt）

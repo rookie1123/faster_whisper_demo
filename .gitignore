@@ -22,3 +22,7 @@ models/
 # 个人录音与派生出来的字幕文件，不上传
 samples/*.mp3
 samples/*.srt
+
+# 「最新一次」的评测结果：每个人本地跑都会覆盖它，入库必然冲突。
+# 正式记录是 reports/ 目录下带时间戳的归档文件。
+eval_report.md

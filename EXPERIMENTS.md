@@ -26,7 +26,7 @@
 | `prompts.py` | initial_prompt 词表（通用中文 / 技术场景），用 `--prompt-name` 调用 |
 | `samples/` | 测试素材（个人录音 `my_audio.mp3` 已被 gitignore，不会上传） |
 | `reports/` | 每次评测的归档报告（带时间戳，不互相覆盖） |
-| `eval_report.md` | 最新一次评测结果（每次运行被覆盖） |
+| `eval_report.md` | 最新一次评测结果（每次运行被覆盖；本地文件，不入库） |
 | `.vscode/` | 本地 IDE 配置，含 F5 运行配置（已被 gitignore） |
 
 ## 评测方法
