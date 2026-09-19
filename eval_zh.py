@@ -133,11 +133,16 @@ def main():
     print(f"标准答案: {reference_raw}")
     print(f"（比较时忽略标点，实际比对 {len(reference)} 个字）\n")
 
+    models_str = ", ".join(args.models)
     report = [
         "# 中文识别评测报告",
         "",
+        f"- 时间: {time.strftime('%Y-%m-%d %H:%M')}",
         f"- 音频文件: `{audio_path.name}`",
         f"- 标准答案: {reference_raw}",
+        f"- 对比模型: {models_str}",
+        f"- initial_prompt: {args.prompt or '（未使用）'}",
+        "- 解码参数: beam_size=5, vad_filter=True, device=cpu, compute_type=int8",
         "",
         "> 原始 CER 把「中文数字」和「阿拉伯数字」的写法差异也算作错误；",
         "> 规范化 CER 会先把两边统一成阿拉伯数字再比较，更接近真实识别水平。",
@@ -221,9 +226,19 @@ def main():
     for name, _, _, _, _, _, _, _, text in results:
         report += [f"**{name}**:", "", f"> {text}", ""]
 
-    out = PROJECT / "eval_report.md"
-    out.write_text("\n".join(report), encoding="utf-8")
-    print(f"报告已写入 {out.name}")
+    text = "\n".join(report)
+
+    # 固定文件名：方便随时查看"最新一次"的结果（会被覆盖）
+    latest = PROJECT / "eval_report.md"
+    latest.write_text(text, encoding="utf-8")
+
+    # 带时间戳归档：保留每一次实验的历史，方便对比
+    reports_dir = PROJECT / "reports"
+    reports_dir.mkdir(exist_ok=True)
+    archived = reports_dir / f"{time.strftime('%Y%m%d-%H%M')}_{audio_path.stem}.md"
+    archived.write_text(text, encoding="utf-8")
+
+    print(f"报告已写入 {latest.name}（最新）和 {archived.relative_to(PROJECT)}（归档）")
 
 
 if __name__ == "__main__":
