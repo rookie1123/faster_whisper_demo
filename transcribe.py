@@ -7,6 +7,8 @@
     python transcribe.py samples/speaker               # 目录里的所有音视频
     python transcribe.py a.mp3 b.m4a --model faster-whisper-tiny
     python transcribe.py samples/speaker --srt         # 顺便输出 .srt 字幕
+    python transcribe.py samples/speaker/speaker_fujian.mp3 --confidence-threshold 0.7
+        # 给可能识别错的句子加 [?] 前缀，人只需要看这几句
 """
 
 import argparse
@@ -67,19 +69,38 @@ def collect_files(paths):
     return files
 
 
+def suspicious_reason(segment, threshold):
+    """判断这一句要不要人工核对，返回 (是否可疑, 最低置信度的词, 该词置信度)。
+
+    用的是逐词置信度 `segment.words[].probability`。
+
+    不要改用 `segment.avg_logprob`：那个数按 30 秒解码窗口算，
+    同一窗口里的句子拿到的是同一个值 —— 实测 26.5 秒的音频跑出 9 句，
+    9 句的 avg_logprob 全是 -0.223（no_speech_prob 也全是 0.069），
+    区分不出哪句有问题。逐词置信度才是逐句可用的信号。
+    """
+    words = [w for w in (segment.words or []) if w.probability is not None]
+    if not words:
+        # 拿不到词级信息（例如整段静音），没有依据就不乱标
+        return False, None, None
+    worst = min(words, key=lambda w: w.probability)
+    return worst.probability < threshold, worst.word.strip(), worst.probability
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="音频/视频转文字",
         epilog=(
             "示例:\n"
-            "  python transcribe.py samples/zh_tts_1.wav\n"
-            "  python transcribe.py samples/zh_tts_1.wav --srt\n"
-            "  python transcribe.py samples --model faster-whisper-small\n"
-            "  python transcribe.py samples/zh_tts_1.wav --prompt-name tech\n"
+            "  python transcribe.py samples/speaker/speaker_fujian.mp3\n"
+            "  python transcribe.py samples/speaker/speaker_fujian.mp3 --srt\n"
+            "  python transcribe.py samples/speaker --model faster-whisper-small\n"
+            "  python transcribe.py samples/speaker/speaker_fujian.mp3 --prompt-name tech\n"
             "  python transcribe.py samples/test1.m4a --models faster-whisper-tiny faster-whisper-small faster-whisper-medium\n"
+            "  python transcribe.py samples/speaker/speaker_fujian.mp3 --confidence-threshold 0.7\n"
             "\n"
             "用 run.bat 启动可避免选错解释器:\n"
-            "  run.bat transcribe.py <音频> [--models a b c] [--srt]"
+            "  run.bat transcribe.py <音频> [--models a b c] [--srt] [--confidence-threshold 0.7]"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -97,6 +118,18 @@ def main():
     parser.add_argument("--prompt", default=None, help="initial_prompt，可放专有名词表")
     parser.add_argument("--prompt-name", default=None, help="prompts.py 里预置的词表名，如 zh / tech")
     parser.add_argument("--srt", action="store_true", help="同时输出 .srt 字幕文件")
+    parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=None,
+        metavar="P",
+        help=(
+            "给「需要校对」的句子打标记：句内只要有词的逐词置信度低于 P（0~1），"
+            "就给这句加 [?] 前缀，并在结尾统计句数。"
+            "在 5 段真人录音上实测，推荐 0.70（召回 0.89 / 准确 0.68）。"
+            "默认关闭；打开会额外计算词级时间戳，稍慢一点。"
+        ),
+    )
 
     # 不带任何参数时直接给出帮助，而不是抛一句干巴巴的 "arguments are required"
     if len(sys.argv) == 1:
@@ -104,6 +137,10 @@ def main():
         return
 
     args = parser.parse_args()
+
+    if args.confidence_threshold is not None and not (0.0 < args.confidence_threshold < 1.0):
+        print(f"[错误] --confidence-threshold 要给 0 到 1 之间的数（收到 {args.confidence_threshold}）")
+        return
 
     if args.prompt_name:
         from prompts import PROMPTS
@@ -121,6 +158,13 @@ def main():
     # --models 优先；否则用 --model；都没传就默认 small
     model_names = args.models or [args.model or "faster-whisper-small"]
     multi = len(model_names) > 1
+
+    # 要判断"哪句可能错"，就必须拿到逐词置信度
+    check_confidence = args.confidence_threshold is not None
+    print_threshold = args.confidence_threshold if check_confidence else 0.0
+
+    flagged_total = 0
+    sentences_total = 0
 
     for name in model_names:
         model_dir = PROJECT / "models" / name
@@ -140,6 +184,7 @@ def main():
                 beam_size=5,
                 vad_filter=True,
                 initial_prompt=args.prompt,
+                word_timestamps=check_confidence,
             )
             segs = list(segments)
             elapsed = time.time() - started
@@ -153,18 +198,44 @@ def main():
             )
             if not segs:
                 print("  (没有识别出内容——可能是纯静音)")
+
+            flagged = 0
+            flagged_marks = []  # 与 segs 一一对应，给 .srt 用
             for s in segs:
-                print(f"  [{s.start:7.2f} -> {s.end:7.2f}] {s.text.strip()}")
+                mark, hint = "", ""
+                if check_confidence:
+                    suspect, bad_word, bad_prob = suspicious_reason(s, print_threshold)
+                    if suspect:
+                        flagged += 1
+                        mark = "[?] "
+                        if bad_word is not None:
+                            hint = f"   <- 最低 {bad_prob:.2f} {bad_word!r}"
+                flagged_marks.append(mark)
+                print(f"  [{s.start:7.2f} -> {s.end:7.2f}] {mark}{s.text.strip()}{hint}")
+
+            if check_confidence and segs:
+                print(f"  共 {len(segs)} 句，其中 {flagged} 句需要人工核对")
+                flagged_total += flagged
+                sentences_total += len(segs)
 
             if args.srt and segs:
                 # 多模型对比时给字幕加上模型名，避免三个模型互相覆盖
                 srt_path = audio.with_suffix(f".{name}.srt") if multi else audio.with_suffix(".srt")
                 lines = []
                 for i, s in enumerate(segs, 1):
-                    lines += [str(i), f"{srt_time(s.start)} --> {srt_time(s.end)}", s.text.strip(), ""]
+                    lines += [
+                        str(i),
+                        f"{srt_time(s.start)} --> {srt_time(s.end)}",
+                        flagged_marks[i - 1] + s.text.strip(),
+                        "",
+                    ]
                 srt_path.write_text("\n".join(lines), encoding="utf-8")
                 print(f"  字幕已写入 {srt_path.name}")
             print()
+
+    # 转写了多个文件时，再给一个总数，方便一眼看到工作量
+    if check_confidence and sentences_total and len(files) > 1:
+        print(f"全部文件合计：共 {sentences_total} 句，其中 {flagged_total} 句需要人工核对")
 
 
 if __name__ == "__main__":
