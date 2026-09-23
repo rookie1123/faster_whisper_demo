@@ -86,7 +86,7 @@ run.bat demo.py
 
 ## 四、五个人的任务
 
-### 成员 A：词表对比
+### 戴一鹏：词表对比
 
 **干什么**：五段录音，每段跑三次（不加词表 / 加 `tech` 词表 / 加 `ml` 词表），看词表有没有用。
 
@@ -105,19 +105,19 @@ run.bat eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt
 1. `reports/` 里会自动生成 15 份报告
 2. 一张表（数字从报告的"规范化后"那一列抄）：
 
-| 说话人 | 不加词表 | tech 词表 | ml 词表 |
-|---|---|---|---|
-| fujian | | | |
-| daiyipeng | | | |
-| huangsiyang | | | |
-| gaojinglin | | | |
-| wenglekang | | | |
+| 说话人         | 不加词表 | tech 词表 | ml 词表 |
+| ----------- | ---- | ------- | ----- |
+| fujian      |      |         |       |
+| daiyipeng   |      |         |       |
+| huangsiyang |      |         |       |
+| gaojinglin  |      |         |       |
+| wenglekang  |      |         |       |
 
 3. 一句结论：词表有用吗？哪种词表更有用？
 
 ---
 
-### 成员 B：模型大小 vs 数值档位
+### 高敬琳：模型大小 vs 数值档位
 
 **干什么**：回答一个问题——算力有限时，应该"用小模型但保精度"，还是"用大模型但量化"？
 
@@ -139,20 +139,20 @@ run.bat eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt
 1. 6 份报告
 2. 一张表：
 
-| 模型 | 数值档位 | 规范化 CER | 识别耗时 | 速度倍率 |
-|---|---|---|---|---|
-| tiny | int8 | | | |
-| tiny | int8_float32 | | | |
-| tiny | float32 | | | |
-| small | int8 | | | |
-| small | int8_float32 | | | |
-| small | float32 | | | |
+| 模型    | 数值档位         | 规范化 CER | 识别耗时 | 速度倍率 |
+| ----- | ------------ | ------- | ---- | ---- |
+| tiny  | int8         |         |      |      |
+| tiny  | int8_float32 |         |      |      |
+| tiny  | float32      |         |      |      |
+| small | int8         |         |      |      |
+| small | int8_float32 |         |      |      |
+| small | float32      |         |      |      |
 
 3. 一句结论：**"tiny + float32" 和 "small + int8" 哪个更好？** 用数字说明。
 
 ---
 
-### 成员 C：给转写工具加"需要校对"标记
+### 翁乐康：给转写工具加"需要校对"标记
 
 **干什么**：现在的转写结果是一整段文字，用户不知道哪儿可能错，只能通读校对。加上标记之后，人只需要看标出来的那几句。
 
@@ -189,7 +189,7 @@ run.bat -c "from faster_whisper import WhisperModel; m=WhisperModel('models/fast
 
 ---
 
-### 成员 D：长音频 + 演示脚本 + 彩排
+### 黄斯杨：长音频 + 演示脚本 + 彩排
 
 **干什么**：现场有 4 分钟演示，现在只有 30 秒的素材，撑不起来。你负责把演示准备好。
 
@@ -215,7 +215,7 @@ run.bat transcribe.py samples\demo\你的音频.m4a --model faster-whisper-small
 
 ---
 
-### 组长
+### 付建
 
 - 把四个人的数据汇总成最终表格
 - 维护 `EXPERIMENTS.md`
