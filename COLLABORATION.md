@@ -82,8 +82,19 @@ git commit -m "feat: 支持 GPU 加速"
 git push -u origin feat/gpu-support
 ```
 
-推完之后打开仓库网页，会出现 **Compare & pull request** 按钮，点它写清楚改了什么，
-然后等待 review。**PR 被合并之前，改动不会进入 main。**
+推完之后打开仓库网页，会出现一条黄色横幅和一个 **Compare & pull request** 按钮——
+点它，填写标题和描述，再点一次 **Create pull request**，到这一步 PR 才算真正创建。
+
+> **PR 不会被自动创建，必须手动点两下。**
+>
+> `git push` 只是把分支传到服务器上，GitHub 顶多给一个"要不要开 PR"的提示。
+> 如果你推完分支就以为完成了，仓库主人收不到任何通知，也不知道你做了什么。
+>
+> 如果那条黄色横幅没出现（它有时效，也可能被浏览器插件挡住），直接打开
+> `https://github.com/rookie1123/faster_whisper_demo/compare/main...你的分支名`
+> 手动创建，效果完全一样。
+
+**PR 被合并之前，改动不会进入 main。**
 
 如果 review 时被要求修改，直接在同一个分支上继续提交并推送，PR 会自动更新，不必重开。
 

@@ -244,7 +244,14 @@ def main():
     # 带时间戳归档：保留每一次实验的历史，方便对比
     reports_dir = PROJECT / "reports"
     reports_dir.mkdir(exist_ok=True)
-    archived = reports_dir / f"{time.strftime('%Y%m%d-%H%M')}_{audio_path.stem}.md"
+    if args.prompt_name:
+        condition = f"_prompt-{args.prompt_name}"
+    elif args.prompt:
+        condition = "_prompt-custom"
+    else:
+        condition = "_noprompt"
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    archived = reports_dir / f"{stamp}_{audio_path.stem}{condition}.md"
     archived.write_text(text, encoding="utf-8")
 
     print(f"报告已写入 {latest.name}（最新）和 {archived.relative_to(PROJECT)}（归档）")
