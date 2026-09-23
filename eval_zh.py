@@ -10,11 +10,32 @@ CER 越低越好：0 表示一字不差，0.1 表示大约每 10 个字错 1 个
 
 import argparse
 import re
+import sys
 import time
 import unicodedata
 from pathlib import Path
 
-from faster_whisper import WhisperModel
+# 解释器自检：本机的系统 PATH 里 D:\python3.6.8 排在 conda 环境前面，
+# 一旦用错解释器，报错会是看不懂的 "No module named 'av'"。这里提前拦下来。
+if sys.version_info < (3, 9):
+    _cmd = " ".join(
+        [r"D:\miniconda\envs\faster-whisper\python.exe", sys.argv[0], *sys.argv[1:]]
+    )
+    sys.exit(
+        "[错误] 解释器版本不对：faster-whisper 要求 Python >= 3.9。\n"
+        f"       当前解释器：Python {sys.version.split()[0]}  ({sys.executable})\n"
+        f"       请改用：{_cmd}\n"
+        "       或直接运行：run.bat eval_zh.py <音频> <标准答案>"
+    )
+
+try:
+    from faster_whisper import WhisperModel
+except ImportError as _exc:
+    sys.exit(
+        f"[错误] 导入 faster_whisper 失败：{_exc}\n"
+        f"       当前解释器：{sys.executable}\n"
+        "       请用 run.bat 或 faster-whisper 环境运行本脚本。"
+    )
 
 PROJECT = Path(__file__).parent
 
@@ -108,7 +129,20 @@ def align(ref: str, hyp: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="中文识别评测（CER）")
+    parser = argparse.ArgumentParser(
+        description="中文识别评测（CER）",
+        epilog=(
+            "示例:\n"
+            "  python eval_zh.py samples/zh_tts_1.wav samples/zh_tts_1.txt\n"
+            "  python eval_zh.py samples/zh_tts_1.wav samples/zh_tts_1.txt --prompt-name tech\n"
+            "  python eval_zh.py samples/zh_tts_1.wav samples/zh_tts_1.txt "
+            "--models faster-whisper-tiny faster-whisper-small\n"
+            "\n"
+            "用 run.bat 启动可避免选错解释器:\n"
+            "  run.bat eval_zh.py <音频> <标准答案>"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("audio", help="要测试的音频文件")
     parser.add_argument("reference", help="标准答案文本文件")
     parser.add_argument(
@@ -119,6 +153,12 @@ def main():
     )
     parser.add_argument("--prompt", default=None, help="可选的 initial_prompt")
     parser.add_argument("--prompt-name", default=None, help="prompts.py 里预置的词表名，如 zh / tech")
+
+    # 不带任何参数时直接给出帮助：最常见的坑就是忘了传音频和标准答案
+    if len(sys.argv) == 1:
+        parser.print_help()
+        return
+
     args = parser.parse_args()
 
     if args.prompt_name:
@@ -143,13 +183,22 @@ def main():
     print(f"（比较时忽略标点，实际比对 {len(reference)} 个字）\n")
 
     models_str = ", ".join(args.models)
+
+    # 归档文件名的提示词标签：避免同一分钟内多次实验互相覆盖，也便于事后一眼区分
+    prompt_tag = ""
+    if args.prompt_name:
+        prompt_tag = f"_{args.prompt_name}"
+    elif args.prompt:
+        prompt_tag = "_custom"
+
     report = [
         "# 中文识别评测报告",
         "",
-        f"- 时间: {time.strftime('%Y-%m-%d %H:%M')}",
+        f"- 时间: {time.strftime('%Y-%m-%d %H:%M:%S')}",
         f"- 音频文件: `{audio_path.name}`",
         f"- 标准答案: {reference_raw}",
         f"- 对比模型: {models_str}",
+        f"- 词表(prompt-name): {args.prompt_name or '（未指定）'}",
         f"- initial_prompt: {args.prompt or '（未使用）'}",
         "- 解码参数: beam_size=5, vad_filter=True, device=cpu, compute_type=int8",
         "",
@@ -244,7 +293,9 @@ def main():
     # 带时间戳归档：保留每一次实验的历史，方便对比
     reports_dir = PROJECT / "reports"
     reports_dir.mkdir(exist_ok=True)
-    archived = reports_dir / f"{time.strftime('%Y%m%d-%H%M')}_{audio_path.stem}.md"
+    archived = reports_dir / (
+        f"{time.strftime('%Y%m%d-%H%M%S')}_{audio_path.stem}{prompt_tag}.md"
+    )
     archived.write_text(text, encoding="utf-8")
 
     print(f"报告已写入 {latest.name}（最新）和 {archived.relative_to(PROJECT)}（归档）")
