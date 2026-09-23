@@ -11,6 +11,8 @@
 run.bat transcribe.py samples\speaker\speaker_fujian.mp3 --confidence-threshold 0.7
 ```
 
+想知道这套标记换到自己的音频上到底灵不灵，再给它一份标准答案就能算准确率/召回率，见第 6 节。
+
 ## 2. 为什么不用 `avg_logprob`
 
 `segment.avg_logprob` 是按 **30 秒解码窗口**算的，同一窗口里所有句子的数值完全相同。
@@ -146,18 +148,78 @@ run.bat transcribe.py samples\speaker\speaker_fujian.mp3 --confidence-threshold 
   高置信度的错误（如「试炼」「漏字」）需要靠词表或更大模型解决，不要指望这个标记。
 - 想要更高召回可以调到 0.80（召回 0.95、准确率 0.60），代价是标出 30/38 句、基本等于没筛。
 
-## 6. 怎么复现
+## 6. 在自己的音频上量准确率/召回率（`--reference`）
+
+上面所有数字都是在 `samples/speaker/` 那 5 段上算出来的。换一批音频、
+想知道「这套标记在它上面表现如何」，只要多给一份标准答案：
+
+```powershell
+run.bat transcribe.py your_audio.m4a --reference your_script.txt
+```
+
+`--reference` 会把识别结果和标准答案**逐字对齐**，判断哪些句子真的含错，
+再和 `[?]` 标记逐句对照，给出混淆矩阵：
+
+```
+  共 9 句，其中 7 句需要人工核对
+  与标准答案比对：标出 7 句，其中 6 句确实有错；另有 1 句有错但没标出
+    TP=6  FP=1  FN=1   准确率 0.86   召回率 0.86   F1 0.857
+```
+
+| 记号 | 含义 |
+|---|---|
+| TP | 标出了、且确实有错 —— 有用的告警 |
+| FP | 标出了、但其实没错 —— **白看的**，白占用复核时间 |
+| FN | 没标、但确实有错 —— **漏掉的**，这个更危险 |
+
+- 「准确率」= TP/(TP+FP)，是「标出来的句子里真有错的占比」，也就是**人工复核的命中率**。
+  上面这个例子里 7 句标出、6 句真有问题。
+- 「召回率」= TP/(TP+FN)，是「真有错的句子里被标出来的占比」。
+- 两个数都随阈值变化，现场换 `--confidence-threshold` 就能看取舍曲线上的不同点。
+
+几个约定：
+
+- 一批音频必须读的是**同一份稿**（像 `samples/speaker/` 那样），否则逐字对齐没有意义。
+- 判定口径与 `eval_zh.py` 的 CER 完全一致（同一套 `normalize` + `normalize_numbers`），
+  所以「百分之四十」与 `40%` 这类纯写法差异不会被算成错。
+- 只给 `--reference`、不给 `--confidence-threshold` 时，自动按推荐的 **0.70** 打标记。
+- 对齐是整篇做的（编辑距离是 O(字数²)），10 分钟以上的音频会明显变慢。
+  只想要标记、不需要指标时，别加 `--reference`。
+
+拿这 5 段录音跑一遍，结果应该与第 3 节表里的 0.70 行完全对上：
+
+```
+run.bat transcribe.py samples\speaker --language zh --reference samples\reading_script.txt
+```
+
+```
+合计：标出 25/38 句，其中 17 句确实有错、漏标 2 句   准确率 0.68   召回率 0.89   F1 0.773
+```
+
+这份指标和 `tools/confidence_probe.py` 的阈值扫描表是**同一份代码**算出来的
+（都走根目录的 `confidence.py`），所以两边数字必然一致 —— 否则就是出了 bug。
+
+## 7. 怎么复现
 
 ```powershell
 # 端到端：给需要核对的句子加 [?]
 run.bat transcribe.py samples\speaker\speaker_fujian.mp3 --confidence-threshold 0.7
 
-# 只看标记结果的句数（5 段录音，应输出「全部文件合计：共 38 句，其中 25 句需要人工核对」）
+# 只看标记结果的句数（5 段录音）
 run.bat transcribe.py samples\speaker --language zh --confidence-threshold 0.7
+
+# 算这批录音上标记的准确率/召回率（见第 6 节）
+run.bat transcribe.py samples\speaker --language zh --reference samples\reading_script.txt
 
 # 重新推导阈值：打印逐词置信度、阈值扫描表、留一交叉验证、误报/漏报样例
 run.bat tools\confidence_probe.py samples\reading_script.txt samples\speaker
 ```
 
-`tools/confidence_probe.py` 就是用来导出上面所有数字的脚本，
-它复用 `eval_zh.py` 的归一化与对齐函数，保证「错词」的判定口径和 CER 评测完全一致。
+分工：
+
+- `tools/confidence_probe.py` —— 用来**选阈值**：扫全区间、留一说话人交叉验证、列误报漏报样例。
+  第 3、4 节的数字都出自它。
+- `transcribe.py --reference` —— 用来**看手上这段音频标得准不准**：给个准确率/召回率就走。
+
+两者的对齐与对错判定都走根目录的 `confidence.py` 同一份实现，
+这样才不会出现「探针说该标、标记却没标」这种口径不一致的矛盾。

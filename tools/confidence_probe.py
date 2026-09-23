@@ -6,9 +6,13 @@
 
 做法：
     1. 用 word_timestamps=True 拿到每个词的 probability；
-    2. 把识别结果和标准答案做逐字编辑距离对齐（复用 eval_zh.py 的 align），
-       凡是落在"替换 / 多字"上的字，就把它所在的那个词标成"错"；
+    2. 把识别结果和标准答案做逐字编辑距离对齐，标出哪些词含错字
+       （对齐与判定逻辑在 confidence.py，和 transcribe.py 的 --reference 共用）；
     3. 统计对/错词的置信度分布，扫一遍候选阈值，算句级与词级的准确率/召回率。
+
+和 transcribe.py 的 --reference 怎么分工：
+    想「选一个阈值」——扫全区间、留一说话人交叉验证——用本脚本；
+    想「看手上这段音频标得准不准」——直接对一段音频给个准确率/召回率——用 --reference。
 
 用法:
     run.bat tools/confidence_probe.py samples/reading_script.txt samples/speaker/speaker_fujian.mp3
@@ -24,10 +28,9 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
 
-# 复用评测脚本里同一套归一化与对齐规则，保证"错词"的判定口径和 CER 完全一致。
-# 注意必须带上 normalize_numbers：否则「百分之四十」和「40%」这种纯写法差异
-# 会被当成错字，把无关的词也标成"错"。
-from eval_zh import align, normalize, normalize_numbers  # noqa: E402
+# 对齐与对错判定都在根目录的 confidence.py 里，和 transcribe.py 的 --reference
+# 共用同一份实现 —— 口径必须一致，否则会出现「探针说该标，标记却没标」的矛盾。
+from confidence import label_words as label_words_of  # noqa: E402
 
 try:
     from faster_whisper import WhisperModel
@@ -80,50 +83,10 @@ def run_model(model, audio):
 def label_words(segments, reference):
     """把每个词标成 True(对) / False(错)。
 
-    做法：把识别文本按「字」摊平，每个字记住自己属于哪个 segment 的哪个词；
-    再和标准答案做编辑距离对齐，落在"替换 / 多字"上的字判错。
-    一个词只要有任何一个字判错，整个词判错（宁可多标，不漏标）。
-
-    两边都先过 normalize + normalize_numbers，和 eval_zh.py 的规范化 CER 同一口径：
-    「百分之四十」和「40%」这种纯写法差异不算错。
+    判定逻辑在根目录 confidence.py 里（与 transcribe.py 的 --reference 共用一份），
+    这里只负责把探针自己的 segments 结构拆成按句分组的词列表喂进去。
     """
-    ref_norm = normalize_numbers(normalize(reference)).replace("\x00", "")
-
-    flat = []  # [(字, seg 下标, word 下标)]
-    for si, s in enumerate(segments):
-        for wi, w in enumerate(s["words"]):
-            for ch in normalize_numbers(normalize(w["word"])).replace("\x00", ""):
-                flat.append((ch, si, wi))
-    hyp_norm = "".join(ch for ch, _, _ in flat)
-
-    _, ops = align(ref_norm, hyp_norm)
-
-    labels = {}  # (si, wi) -> [每个字的对错]
-    j = 0
-    for tag, _r, _h in ops:
-        if tag in ("ok", "替换", "多字"):
-            _, si, wi = flat[j]
-            labels.setdefault((si, wi), []).append(tag == "ok")
-            j += 1
-        elif j < len(flat):
-            # "漏字"：识别侧少了一个字。这个字不算在任何词头上，
-            # 但如果不管它，"有漏字的句子"就会被误判成干净句 ——
-            # 所以把漏字位置紧跟的那个词也标成"错"（错字就丢在那里）。
-            _, si, wi = flat[j]
-            labels.setdefault((si, wi), []).append(False)
-        elif flat:
-            # 漏字发生在句尾：归到最后一个词
-            _, si, wi = flat[-1]
-            labels.setdefault((si, wi), []).append(False)
-
-    for si, s in enumerate(segments):
-        for wi, w in enumerate(s["words"]):
-            marks = labels.get((si, wi), [])
-            # 纯标点的词会被 normalize 掉，marks 为空 —— 不参与对错判定
-            w["has_ref"] = bool(marks)
-            w["correct"] = all(marks) if marks else None
-
-    return ref_norm, hyp_norm
+    return label_words_of([s["words"] for s in segments], reference)
 
 
 def sweep(records, thresholds):
@@ -148,7 +111,9 @@ def sweep(records, thresholds):
                 fn += 1
         wp = tp / (tp + fp) if tp + fp else float("nan")
         wr = tp / (tp + fn) if tp + fn else float("nan")
-        wf = 2 * wp * wr / (wp + wr) if tp + fp and tp + fn else 0.0
+        # F1 的分母是 wp+wr。tp 为 0 时 wp、wr 也全是 0，直接算会除零 ——
+        # 短音频（词数少）在扫描中间阈值时很容易撞上，所以按 tp 判断。
+        wf = 2 * wp * wr / (wp + wr) if tp else 0.0
 
         # ---- 句级 ----
         by_seg = {}
@@ -163,7 +128,8 @@ def sweep(records, thresholds):
         sfn = sum(1 for d in by_seg.values() if not d["flag"] and d["err"])
         sp = stp / (stp + sfp) if stp + sfp else float("nan")
         sr = stp / (stp + sfn) if stp + sfn else float("nan")
-        sf = 2 * sp * sr / (sp + sr) if stp + sfp and stp + sfn else 0.0
+        # 同词级：stp 为 0 时 sp、sr 都是 0，会除零
+        sf = 2 * sp * sr / (sp + sr) if stp else 0.0
 
         rows.append(
             {"t": t, "tp": tp, "fp": fp, "fn": fn, "wp": wp, "wr": wr, "wf": wf,
@@ -350,18 +316,23 @@ def main():
     )
 
     # ---------------- 留一说话人交叉验证 ----------------
-    folds, tp, fp, fn, p, rc = loocv(records, thresholds)
     print("\n--- 留一说话人交叉验证（阈值在其余音频上选，在留出的那位身上评）---")
-    print("  留出音频                    选出阈值  标出  真含错且标出  误标  漏标  准确率  召回率")
-    for g, t, r in folds:
-        print("  %-26s %.2f   %4d   %11d  %4d  %4d  %s  %s"
-              % (g[:26], t, r["stp"] + r["sfp"], r["stp"], r["sfp"], r["sfn"],
-                 "%.2f" % r["sp"] if r["stp"] + r["sfp"] else "  -  ",
-                 "%.2f" % r["sr"] if r["stp"] + r["sfn"] else "  -  "))
-    print(
-        "  合计: TP=%d FP=%d FN=%d  ->  准确率 %.2f，召回率 %.2f"
-        % (tp, fp, fn, p, rc)
-    )
+    folds, tp, fp, fn, p, rc = loocv(records, thresholds)
+    if not folds:
+        # 只有一段音频时留不出训练集。这不是错误，直接说明比打一张空表好。
+        print("  至少要 2 段音频才谈得上「留一」，当前只有 1 段，跳过。")
+        print("  单段音频看上面的阈值扫描就够了；要选阈值请把同一份稿的多段录音一起传进来。")
+    else:
+        print("  留出音频                    选出阈值  标出  真含错且标出  误标  漏标  准确率  召回率")
+        for g, t, r in folds:
+            print("  %-26s %.2f   %4d   %11d  %4d  %4d  %s  %s"
+                  % (g[:26], t, r["stp"] + r["sfp"], r["stp"], r["sfp"], r["sfn"],
+                     "%.2f" % r["sp"] if r["stp"] + r["sfp"] else "  -  ",
+                     "%.2f" % r["sr"] if r["stp"] + r["sfn"] else "  -  "))
+        print(
+            "  合计: TP=%d FP=%d FN=%d  ->  准确率 %.2f，召回率 %.2f"
+            % (tp, fp, fn, p, rc)
+        )
 
     # ---------------- 推荐工作点 ----------------
     print("\n--- 推荐工作点 ---")

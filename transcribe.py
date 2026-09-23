@@ -9,6 +9,8 @@
     python transcribe.py samples/speaker --srt         # 顺便输出 .srt 字幕
     python transcribe.py samples/speaker/speaker_fujian.mp3 --confidence-threshold 0.7
         # 给可能识别错的句子加 [?] 前缀，人只需要看这几句
+    python transcribe.py samples/speaker --reference samples/reading_script.txt
+        # 有标准答案时顺带算出标记的准确率/召回率，看这套标记到底灵不灵
 """
 
 import argparse
@@ -37,6 +39,19 @@ except ImportError as _exc:
     )
 
 PROJECT = Path(__file__).parent
+
+# 标准答案的对齐与对错判定和 tools/confidence_probe.py 共用同一份实现。
+# 放在 faster_whisper 检查之后导入：confidence 会连带导入 eval_zh，
+# 而 eval_zh 也要用 faster_whisper，先过上面的友好报错更省事。
+if str(PROJECT) not in sys.path:
+    sys.path.insert(0, str(PROJECT))
+from confidence import (  # noqa: E402
+    DEFAULT_THRESHOLD,
+    fmt_metrics,
+    label_words,
+    prf,
+    sentence_flags,
+)
 
 MEDIA_EXT = {
     ".mp3", ".wav", ".m4a", ".flac", ".aac", ".wma", ".ogg", ".opus",
@@ -98,6 +113,7 @@ def main():
             "  python transcribe.py samples/speaker/speaker_fujian.mp3 --prompt-name tech\n"
             "  python transcribe.py samples/test1.m4a --models faster-whisper-tiny faster-whisper-small faster-whisper-medium\n"
             "  python transcribe.py samples/speaker/speaker_fujian.mp3 --confidence-threshold 0.7\n"
+            "  python transcribe.py samples/speaker --reference samples/reading_script.txt\n"
             "\n"
             "用 run.bat 启动可避免选错解释器:\n"
             "  run.bat transcribe.py <音频> [--models a b c] [--srt] [--confidence-threshold 0.7]"
@@ -130,6 +146,17 @@ def main():
             "默认关闭；打开会额外计算词级时间戳，稍慢一点。"
         ),
     )
+    parser.add_argument(
+        "--reference",
+        default=None,
+        metavar="PATH",
+        help=(
+            "标准答案文本。给了它才能算「[?] 标记的准确率/召回率」——"
+            "把识别结果和标准答案逐字对齐，看标出来的句子是不是真错、有没有漏掉。"
+            "一批音频必须读的是同一份稿。"
+            "不给就只标记、不算指标；给了它却没给 --confidence-threshold 时按 0.70 开标记。"
+        ),
+    )
 
     # 不带任何参数时直接给出帮助，而不是抛一句干巴巴的 "arguments are required"
     if len(sys.argv) == 1:
@@ -137,6 +164,11 @@ def main():
         return
 
     args = parser.parse_args()
+
+    # 要算「标出的句子里有多少是真错」，前提是先得有标记。
+    # 所以给了标准答案却没给阈值时，按实测推荐的 0.70 自动把标记打开。
+    if args.reference is not None and args.confidence_threshold is None:
+        args.confidence_threshold = DEFAULT_THRESHOLD
 
     if args.confidence_threshold is not None and not (0.0 < args.confidence_threshold < 1.0):
         print(f"[错误] --confidence-threshold 要给 0 到 1 之间的数（收到 {args.confidence_threshold}）")
@@ -155,6 +187,21 @@ def main():
         print("没有找到可转写的文件")
         return
 
+    # 标准答案：有它才能算标记的准确率/召回率，没有就只标记
+    reference = None
+    ref_path = None
+    if args.reference:
+        ref_path = Path(args.reference)
+        if not ref_path.is_absolute():
+            ref_path = PROJECT / ref_path
+        if not ref_path.exists():
+            print(f"[错误] 找不到标准答案文件：{ref_path}")
+            return
+        reference = ref_path.read_text(encoding="utf-8").strip()
+        if not reference:
+            print(f"[错误] 标准答案文件是空的：{ref_path}")
+            return
+
     # --models 优先；否则用 --model；都没传就默认 small
     model_names = args.models or [args.model or "faster-whisper-small"]
     multi = len(model_names) > 1
@@ -166,6 +213,12 @@ def main():
     flagged_total = 0
     sentences_total = 0
 
+    if reference is not None:
+        print(
+            f"标准答案: {ref_path.name}（{len(reference)} 字）   "
+            f"标记阈值 {print_threshold:.2f}\n"
+        )
+
     for name in model_names:
         model_dir = PROJECT / "models" / name
         if not model_dir.exists():
@@ -175,6 +228,7 @@ def main():
 
         print(f"模型: {name}   设备: {args.device}   待转写: {len(files)} 个文件\n")
         model = WhisperModel(str(model_dir), device=args.device, compute_type=args.compute_type)
+        model_flags = []  # 有标准答案时，攒起各音频的句级判定算合计
 
         for audio in files:
             started = time.time()
@@ -218,6 +272,23 @@ def main():
                 flagged_total += flagged
                 sentences_total += len(segs)
 
+            if reference is not None and segs:
+                # 转成 confidence.py 认得的形状。判定规则和上面打 [?] 的完全同源，
+                # 否则会出现"这行没标 [?]、指标却把它算成漏标"的自相矛盾。
+                seg_words = [
+                    [{"word": w.word, "probability": w.probability} for w in (s.words or [])]
+                    for s in segs
+                ]
+                label_words(seg_words, reference)
+                flags = sentence_flags(seg_words, print_threshold)
+                model_flags += flags
+                m = prf(flags)
+                print(
+                    f"  与标准答案比对：标出 {m['flagged']} 句，其中 {m['tp']} 句确实有错；"
+                    f"另有 {m['fn']} 句有错但没标出"
+                )
+                print(f"    TP={m['tp']}  FP={m['fp']}  FN={m['fn']}   {fmt_metrics(m)}")
+
             if args.srt and segs:
                 # 多模型对比时给字幕加上模型名，避免三个模型互相覆盖
                 srt_path = audio.with_suffix(f".{name}.srt") if multi else audio.with_suffix(".srt")
@@ -233,8 +304,20 @@ def main():
                 print(f"  字幕已写入 {srt_path.name}")
             print()
 
-    # 转写了多个文件时，再给一个总数，方便一眼看到工作量
-    if check_confidence and sentences_total and len(files) > 1:
+        # 多文件时给这个模型的合计指标（单文件在上面已经报过了）
+        if reference is not None and model_flags and len(files) > 1:
+            total = prf(model_flags)
+            prefix = f"[{name}] " if multi else ""
+            print(
+                f"{prefix}合计：标出 {total['flagged']}/{total['n']} 句，"
+                f"其中 {total['tp']} 句确实有错、漏标 {total['fn']} 句   "
+                f"{fmt_metrics(total)}"
+            )
+            print()
+
+    # 转写了多个文件时，再给一个总数，方便一眼看到工作量。
+    # 有标准答案时上面那道「合计」已经报过句数了，不重复。
+    if check_confidence and sentences_total and len(files) > 1 and reference is None:
         print(f"全部文件合计：共 {sentences_total} 句，其中 {flagged_total} 句需要人工核对")
 
 
