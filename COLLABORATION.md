@@ -54,9 +54,10 @@ git config --global https.proxy http://127.0.0.1:7897
 | 内容 | 是否在仓库里 | 说明 |
 |---|---|---|
 | 代码、脚本、文档 | 有 | `faster_whisper/`、`eval_zh.py`、`transcribe.py` 等 |
-| 合成测试音频 + 标准答案 | 有 | `samples/zh_tts_1.wav`、`zh_tts_2.wav` |
+| 朗读稿 + 合成音频 | 有 | `samples/reading_script.txt`、`samples/reading_script_tts.wav` |
+| 团队真人录音 | 有 | `samples/speaker/`，命名 `speaker_<名字>.<后缀>` |
 | 模型权重 | **没有** | 自己下载，见上面第 1 条 |
-| 别人的个人录音 | **没有** | 已被 `.gitignore` 排除 |
+| 第一轮的私人录音 | **没有** | 在 `samples/round1/`，音频已被 `.gitignore` 排除 |
 | `.venv/`、`.vscode/` | **没有** | 各自建各自的环境，互不干扰 |
 
 ## 二、标准工作流

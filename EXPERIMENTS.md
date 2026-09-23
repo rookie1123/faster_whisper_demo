@@ -20,14 +20,36 @@
 | 文件 | 作用 |
 |---|---|
 | `demo_readme.md` | 项目说明：相对上游改了什么、实验结果、下一步方向 |
+| `COLLABORATION.md` | 协作指南：环境准备、分支流程、PR 检查清单 |
 | `demo.py` | 最小示例，识别仓库自带的英文 `tests/data/jfk.flac`，用来验证环境 |
 | `transcribe.py` | 转写任意音频/视频，不需要标准答案；`--models` 可一次对比多个模型，`--srt` 输出字幕 |
 | `eval_zh.py` | 正式评测：给定音频和标准答案，计算 CER 字错率，对比多个模型 |
 | `prompts.py` | initial_prompt 词表（通用中文 / 技术场景），用 `--prompt-name` 调用 |
-| `samples/` | 测试素材（个人录音 `my_audio.mp3` 已被 gitignore，不会上传） |
+| `download_model.py` | 下载模型权重到 `models/`（默认走 hf-mirror，支持断点续传） |
+| `run.bat` | 统一入口，固定使用项目内的 `.venv`，避免系统 PATH 里别的 Python 抢先 |
+| `samples/` | 测试素材，目录结构见下 |
 | `reports/` | 每次评测的归档报告（带时间戳，不互相覆盖） |
 | `eval_report.md` | 最新一次评测结果（每次运行被覆盖；本地文件，不入库） |
 | `.vscode/` | 本地 IDE 配置，含 F5 运行配置（已被 gitignore） |
+
+### 素材目录结构
+
+```
+samples/
+├── reading_script.txt         # 朗读稿，也是唯一的评测标准答案
+├── reading_script_tts.wav     # 同一段文字的合成语音，作为"干净音频"对照组
+├── speaker/                   # 真人录音，命名 speaker_<名字>.<后缀>
+└── round1/                    # 第一轮实验素材（已归档，音频不入库）
+```
+
+三条约定：
+
+1. **所有真人录音统一放 `samples/speaker/`**，命名成 `speaker_<名字>.mp3|m4a`，
+   不再散落在仓库根目录或 `tests/data/` 里。
+2. **标准答案统一用 `samples/reading_script.txt`**，不要每个人各传一份
+   （内容相同，多份来源会让人不知道该信哪个）。
+3. 第一轮实验用的音频归档在 `samples/round1/`，其中音频文件被 `.gitignore` 排除，
+   只保留当时的答案文本；对应的实验结论见下方"实验一、实验二"。
 
 ## 评测方法
 
@@ -210,14 +232,19 @@ uv venv .venv --python 3.12 --seed
 # 3. 环境自检
 .\.venv\Scripts\python.exe demo.py
 
-# 4. 评测（有标准答案）—— 用仓库自带的合成音频最省事
-.\.venv\Scripts\python.exe eval_zh.py samples\zh_tts_1.wav samples\zh_tts_1.txt
-# 三模型对照
-.\.venv\Scripts\python.exe eval_zh.py samples\zh_tts_1.wav samples\zh_tts_1.txt --models faster-whisper-tiny faster-whisper-small faster-whisper-medium
-# 真实录音 samples\my_audio.mp3 未入库（已 gitignore），需自备
+# 4. 评测（有标准答案）
+#    真人录音示例（仓库内已有三段，见 samples/speaker/）
+.\.venv\Scripts\python.exe eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt
+#    三模型对照
+.\.venv\Scripts\python.exe eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt --models faster-whisper-tiny faster-whisper-small faster-whisper-medium
+#    用合成音频做对照（排除录音质量的影响）
+.\.venv\Scripts\python.exe eval_zh.py samples\reading_script_tts.wav samples\reading_script.txt
 
 # 5. 转写（没有标准答案，只想看内容）
-.\.venv\Scripts\python.exe transcribe.py samples\my_audio.mp3 --srt
+.\.venv\Scripts\python.exe transcribe.py samples\speaker\speaker_fujian.mp3 --srt
+
+# 也可以用 run.bat 包一层，它会自动使用项目内的 .venv
+run.bat eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt
 ```
 
 ## 待办

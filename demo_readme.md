@@ -23,18 +23,17 @@
 uv venv .venv --python 3.12 --seed
 .\.venv\Scripts\python.exe -m pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 2. 下载模型到 models/faster-whisper-small/（国内建议用镜像，4 个文件缺一不可）
-#    https://hf-mirror.com/Systran/faster-whisper-small/resolve/main/model.bin
-#    .../config.json   .../tokenizer.json   .../vocabulary.txt
+# 2. 下载模型到 models/（默认走 hf-mirror，支持断点续传）
+.\.venv\Scripts\python.exe download_model.py small
 
 # 3. 环境自检（识别仓库自带的英文测试音频）
 .\.venv\Scripts\python.exe demo.py
 
 # 4. 评测中文准确率（需要一段音频 + 对应的标准答案文本）
-.\.venv\Scripts\python.exe eval_zh.py samples\my_audio.mp3 samples\my_audio.txt
+.\.venv\Scripts\python.exe eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt
 
 # 5. 转写任意音视频，并输出字幕
-.\.venv\Scripts\python.exe transcribe.py samples\my_audio.mp3 --srt --prompt-name tech
+.\.venv\Scripts\python.exe transcribe.py samples\speaker\speaker_fujian.mp3 --srt
 ```
 
 在 VSCode 里也可以用 `F5` 直接运行：`.vscode/launch.json` 预置了评测、带词表评测、转写、自检四套配置。
@@ -55,7 +54,7 @@ uv venv .venv --python 3.12 --seed
 | `EXPERIMENTS.md` | 实验记录：环境、方法、结论、复现步骤 | 让实验结论脱离聊天记录独立存在 |
 | `demo_readme.md` | 本文件 | 说明本项目相对上游做了什么 |
 | `COLLABORATION.md` | 协作指南：环境准备、分支流程、PR 清单、冲突处理 | 新人上手的第一个摩擦点不是写代码，而是环境和流程 |
-| `samples/` | 测试素材（2 段合成音频 + 标准答案） | 让任何人 clone 下来都能立刻复现评测，不必先自己录音 |
+| `samples/` | 测试素材：朗读稿、合成音频对照组、团队真人录音 | 让任何人 clone 下来都能立刻复现评测，不必先自己录音 |
 | `reports/` | 每次评测的时间戳归档 | 实验历史不再互相覆盖 |
 | `.gitignore` | 排除 `.venv/`、`models/`、个人录音、派生字幕 | 仓库只放"人与人需要共享的东西"，机器生成的一律不入库 |
 
@@ -119,7 +118,7 @@ Whisper 支持 `initial_prompt`：把一段文本当作"前文"喂给模型，�
 本项目已把词表集中到 `prompts.py`，两个脚本都支持 `--prompt-name` 参数：
 
 ```powershell
-.\.venv\Scripts\python.exe eval_zh.py samples\my_audio.mp3 samples\my_audio.txt --prompt-name tech
+.\.venv\Scripts\python.exe eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt --prompt-name ml
 ```
 
 > **状态说明**：词表机制已实现（`prompts.py`），但**效果尚未验证**——
@@ -139,7 +138,11 @@ faster-whisper/
 ├── transcribe.py            # 转写工具（支持 --srt）
 ├── eval_zh.py               # 中文评测（CER）
 ├── prompts.py               # initial_prompt 词表
-├── samples/                 # 测试素材（个人录音已在 .gitignore 中排除）
+├── samples/                 # 测试素材
+│   ├── reading_script.txt   #   朗读稿（唯一的评测标准答案）
+│   ├── reading_script_tts.wav  # 同一段文字的合成语音，干净音频对照组
+│   ├── speaker/             #   团队真人录音
+│   └── round1/              #   第一轮素材（音频不入库）
 ├── reports/                 # 历次评测归档
 ├── models/                  # 模型权重，不入库
 └── .venv/                   # 虚拟环境，不入库

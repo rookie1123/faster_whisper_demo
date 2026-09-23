@@ -1,17 +1,31 @@
 @echo off
-REM 统一入口: 固定使用 faster-whisper 环境 (Python 3.12), 避免误用系统 Python 3.6
-REM 不切换 chcp, 让 Python 用系统默认编码输出, 中文才不会乱码
-set "PY=D:\miniconda\envs\faster-whisper\python.exe"
-if not exist "%PY%" (
-    echo [ERROR] Python not found: %PY%
-    echo Please create it first: conda create -n faster-whisper python=3.12 -y
-    exit /b 1
-)
+REM Wrapper that prefers the project-local .venv, so the script never picks up
+REM another Python from PATH.
+REM
+REM Keep this file ASCII-only. cmd.exe reads .bat files using the OEM codepage
+REM (GBK on Chinese Windows); non-ASCII comments break parsing on some machines.
+
+setlocal
+cd /d "%~dp0"
+
 if "%~1"=="" (
     echo Usage: run.bat ^<script^> [args...]
-    echo   run.bat eval_zh.py samples\zh_tts_1.wav samples\zh_tts_1.txt
-    echo   run.bat transcribe.py samples\zh_tts_1.wav --model faster-whisper-small --srt
     echo   run.bat demo.py
+    echo   run.bat eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt
+    echo   run.bat transcribe.py samples\speaker\speaker_fujian.mp3 --model faster-whisper-small --srt
     exit /b 0
 )
+
+if exist ".venv\Scripts\python.exe" (
+    set "PY=.venv\Scripts\python.exe"
+) else (
+    echo [WARN] .venv not found, falling back to "python" from PATH.
+    echo        If you get "No module named 'av'", the wrong interpreter was used.
+    echo        Create the environment first:
+    echo          uv venv .venv --python 3.12 --seed
+    echo          .venv\Scripts\python.exe -m pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
+    set "PY=python"
+)
+
 "%PY%" %*
+endlocal

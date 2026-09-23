@@ -4,8 +4,8 @@ CER (Character Error Rate) = (替换 + 删除 + 插入) / 标准答案的字数
 CER 越低越好：0 表示一字不差，0.1 表示大约每 10 个字错 1 个字。
 
 用法:
-    python eval_zh.py samples/my_audio.m4a samples/my_audio.txt
-    python eval_zh.py samples/my_audio.m4a samples/my_audio.txt --models faster-whisper-tiny faster-whisper-small
+    python eval_zh.py samples/speaker/speaker_fujian.mp3 samples/reading_script.txt
+    python eval_zh.py samples/speaker/speaker_fujian.mp3 samples/reading_script.txt --prompt-name ml
 """
 
 import argparse
@@ -15,16 +15,14 @@ import time
 import unicodedata
 from pathlib import Path
 
-# 解释器自检：本机的系统 PATH 里 D:\python3.6.8 排在 conda 环境前面，
-# 一旦用错解释器，报错会是看不懂的 "No module named 'av'"。这里提前拦下来。
+# 解释器自检：系统 PATH 里可能排着别的 Python 版本，一旦用错解释器，
+# 报错会是看不懂的 "No module named 'av'"。这里提前拦下来。
 if sys.version_info < (3, 9):
-    _cmd = " ".join(
-        [r"D:\miniconda\envs\faster-whisper\python.exe", sys.argv[0], *sys.argv[1:]]
-    )
+    _venv_python = Path(__file__).resolve().parent / ".venv" / "Scripts" / "python.exe"
     sys.exit(
         "[错误] 解释器版本不对：faster-whisper 要求 Python >= 3.9。\n"
         f"       当前解释器：Python {sys.version.split()[0]}  ({sys.executable})\n"
-        f"       请改用：{_cmd}\n"
+        f"       请改用项目内的虚拟环境：{_venv_python}\n"
         "       或直接运行：run.bat eval_zh.py <音频> <标准答案>"
     )
 
@@ -133,9 +131,9 @@ def main():
         description="中文识别评测（CER）",
         epilog=(
             "示例:\n"
-            "  python eval_zh.py samples/zh_tts_1.wav samples/zh_tts_1.txt\n"
-            "  python eval_zh.py samples/zh_tts_1.wav samples/zh_tts_1.txt --prompt-name tech\n"
-            "  python eval_zh.py samples/zh_tts_1.wav samples/zh_tts_1.txt "
+            "  python eval_zh.py samples/speaker/speaker_fujian.mp3 samples/reading_script.txt\n"
+            "  python eval_zh.py samples/speaker/speaker_fujian.mp3 samples/reading_script.txt --prompt-name ml\n"
+            "  python eval_zh.py samples/speaker/speaker_fujian.mp3 samples/reading_script.txt "
             "--models faster-whisper-tiny faster-whisper-small\n"
             "\n"
             "用 run.bat 启动可避免选错解释器:\n"

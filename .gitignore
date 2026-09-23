@@ -19,12 +19,15 @@ venv/
 models/
 *.egg-info/
 
-# 个人录音与派生出来的字幕文件，不上传
-# （samples/ 下仓库自带的 zh_tts_*.wav 是合成音频，需要保留，所以只按后缀忽略）
+# 录音素材
+# - samples/speaker/ 下是团队朗读录音，内容为一段中性技术文字，入库以便复现
+# - samples/round1/ 是第一轮实验的私人录音，不公开
+# - samples/ 根目录下按后缀兜底忽略，避免录音误落在根目录
 samples/*.mp3
 samples/*.m4a
 samples/*.aac
-samples/*.srt
+samples/round1/
+samples/**/*.srt
 
 # 「最新一次」的评测结果：每个人本地跑都会覆盖它，入库必然冲突。
 # 正式记录是 reports/ 目录下带时间戳的归档文件。

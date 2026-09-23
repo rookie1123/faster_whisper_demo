@@ -3,10 +3,10 @@
 想评测准确率（有标准答案、算字错率）请用 eval_zh.py。
 
 用法:
-    python transcribe.py samples/my_audio.mp3
-    python transcribe.py samples                      # 目录里的所有音视频
+    python transcribe.py samples/speaker/speaker_fujian.mp3
+    python transcribe.py samples/speaker               # 目录里的所有音视频
     python transcribe.py a.mp3 b.m4a --model faster-whisper-tiny
-    python transcribe.py samples --srt                # 顺便输出 .srt 字幕
+    python transcribe.py samples/speaker --srt         # 顺便输出 .srt 字幕
 """
 
 import argparse
@@ -14,16 +14,14 @@ import sys
 import time
 from pathlib import Path
 
-# 解释器自检：本机的系统 PATH 里 D:\python3.6.8 排在 conda 环境前面，
-# 一旦用错解释器，报错会是看不懂的 "No module named 'av'"。这里提前拦下来。
+# 解释器自检：系统 PATH 里可能排着别的 Python 版本，一旦用错解释器，
+# 报错会是看不懂的 "No module named 'av'"。这里提前拦下来。
 if sys.version_info < (3, 9):
-    _cmd = " ".join(
-        [r"D:\miniconda\envs\faster-whisper\python.exe", sys.argv[0], *sys.argv[1:]]
-    )
+    _venv_python = Path(__file__).resolve().parent / ".venv" / "Scripts" / "python.exe"
     sys.exit(
         "[错误] 解释器版本不对：faster-whisper 要求 Python >= 3.9。\n"
         f"       当前解释器：Python {sys.version.split()[0]}  ({sys.executable})\n"
-        f"       请改用：{_cmd}\n"
+        f"       请改用项目内的虚拟环境：{_venv_python}\n"
         "       或直接运行：run.bat transcribe.py <音频> [--srt]"
     )
 
