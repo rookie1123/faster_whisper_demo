@@ -11,7 +11,7 @@
 |---|---|---|---|
 | 组长 | 数据汇总、PPT、讲稿、合并 PR | 汇报材料 | 持续 |
 | A | prompt 词表 A/B 对照实验 | 对照表 + 若干份实验报告 | 1.5 小时 |
-| B | 量化档位对比实验 | 精度与速度对照表 | 1 小时 |
+| B | 精度与速度的取舍（模型规模 × 数值档位） | 完整对照表 + 一句结论 | 1.5 小时 |
 | C | 低置信度标记功能 | `transcribe.py` 新参数 + 演示 | 2 小时 |
 | D | 真实音频素材 + demo 脚本 + 彩排 | 素材 + 脚本 + 彩排记录 | 2 小时 |
 
@@ -23,7 +23,7 @@
 | 成员 | PR 里必须包含 |
 |---|---|
 | A | 所有录音 × 3 个条件的实验报告（`reports/` 自动生成）+ 一张"说话人 × 词表"对照表（写进 `EXPERIMENTS.md`） |
-| B | 2 个模型 × 3 个档位共 6 份报告 + 一张精度与速度对照表 |
+| B | 2 个模型 × 3 个档位共 6 份报告 + 一张完整对照表 + 回答"保精度还是加规模"的结论 |
 | C | `transcribe.py` 的新参数 + 一份验证记录（标记的片段里真的包含错误吗） |
 | D | 2–3 分钟音频 + `docs/demo-script.md` + 一次彩排记录（含各步耗时） |
 
@@ -110,54 +110,82 @@ cd "你的仓库目录"
 
 ---
 
-## 成员 B：量化档位对比实验
+## 成员 B：精度与速度的取舍（模型规模 × 数值档位）
 
 ### 为什么做
 
-目前所有实验都跑在 `compute_type=int8` 上，但**从来没有人验证过这个选择是否合理**。
-量化是"精度换速度"的取舍：int8 把权重压成 8 位整数，省内存、跑得快，
-代价是可能损失精度；float32 精度最高但最慢。
+目前所有实验都跑在默认的 `compute_type=int8` 上，**从来没有人验证过这个选择是否合理**。
 
-这正好对应课件的"部署与评测"模块——**指标、消融、失败分析**。
-做完能回答一个实际问题：**在 CPU 上跑中文识别，哪种量化档位性价比最高。**
+但"把三个档位互相比一比"本身意义有限——CPU 上只有三个档位可用，
+而且它们之间的差异可能很小。**真正值得回答的是另一个问题**：
+
+> 如果算力有限，应该"用小模型但保精度"，还是"用大模型但量化"？
+
+这个问题直接决定别人部署时怎么选，也是这条实验真正的价值所在。
+
+### 先说清楚硬件限制（重要）
+
+**CTranslate2 的 CPU 后端不支持 float16，也不支持 bfloat16。**
+在 i5-12500H 上实测，六个候选档位里只有三个能跑：
+
+| 档位 | 权重精度 | 计算精度 | 这台机器 |
+|---|---|---|---|
+| `int8` | int8 | int8 | ✅ 默认 |
+| `int8_float32` | int8 | float32 | ✅ |
+| `float32` | float32 | float32 | ✅ |
+| `bfloat16` | — | — | ❌ 需要 AVX512-BF16 或 AMX |
+| `int8_bfloat16` | — | — | ❌ 同上 |
+| `float16` | — | — | ❌ 需要 GPU |
+
+所以**不要试 float16**，白费力气。这条限制本身就是一条可写进报告的结论：
+数值精度的选择不是随便挑的，是被硬件后端限制死的。
 
 ### 怎么做
 
-用同一段音频，换不同量化档位各跑一次：
+同一段音频（建议 `samples/speaker/speaker_fujian.mp3`），跑 2 个模型 × 3 个档位：
 
 ```powershell
-# 三个档位，都用同一段音频和同一个模型，只改 --compute-type
+cd "你的仓库目录"
+
+# tiny × 三个档位
+.\.venv\Scripts\python.exe eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt --models faster-whisper-tiny --compute-type int8
+.\.venv\Scripts\python.exe eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt --models faster-whisper-tiny --compute-type int8_float32
+.\.venv\Scripts\python.exe eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt --models faster-whisper-tiny --compute-type float32
+
+# small × 三个档位
 .\.venv\Scripts\python.exe eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt --models faster-whisper-small --compute-type int8
 .\.venv\Scripts\python.exe eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt --models faster-whisper-small --compute-type int8_float32
 .\.venv\Scripts\python.exe eval_zh.py samples\speaker\speaker_fujian.mp3 samples\reading_script.txt --models faster-whisper-small --compute-type float32
 ```
 
-再把模型从 small 换成 tiny 重复一遍，就得到 2 × 3 的完整矩阵。
-非默认档位会自动写进报告文件名（如 `..._noprompt_float32.md`），方便区分。
+非默认档位会自动写进报告文件名（如 `..._noprompt_float32.md`），做对比时一眼能区分。
 
 ### 产出物
 
-一张表：
+一张完整的表（数字从生成的报告里抄，不要自己另算）：
 
 ```
-| 模型 | 量化档位 | 规范化 CER | 识别耗时 | 速度倍率 |
+| 模型 | 数值档位 | 规范化 CER | 识别耗时 | 速度倍率 |
 |---|---|---|---|---|
-| tiny | int8 | | | |
-| tiny | float32 | | | |
-| small | int8 | | | |
-| small | float32 | | | |
+| tiny  | int8         | | | |
+| tiny  | int8_float32 | | | |
+| tiny  | float32      | | | |
+| small | int8         | | | |
+| small | int8_float32 | | | |
+| small | float32      | | | |
 ```
 
-### 注意（重要）
+**然后写一句结论**，回答这两个问题：
 
-**float16 在 CPU 上跑不了。** CTranslate2 的 CPU 后端不支持 float16 计算，
-直接传 `--compute-type float16` 会报错。脚本已经加了友好提示，但你要知道原因：
-float16 需要 GPU 才算得动。
+1. 同一个模型里，int8 相比 float32 损失了多少精度？换来了多少速度？
+2. **tiny + float32 与 small + int8 哪个更好？** 也就是"保精度"和"加规模"哪个更划算？
 
-**这本身就是一条值得写进报告的结论**：它说明"模型精度选择"不是随便挑的，
-而是被硬件后端限制死的。如果老师问"你们为什么不用 float16"，这就是答案。
+第 2 问是这条实验的核心，答案要能用一句话说清楚，并给出数字依据。
 
-另外 float32 在 CPU 上明显更慢，跑之前先用短音频试一下（`samples/reading_script_tts.wav` 只有 30 秒，适合先摸底）。
+### 注意
+
+- float32 在 CPU 上明显更慢，先用 30 秒的短音频（`samples/reading_script_tts.wav`）摸底
+- 六个组合要**用同一段音频**，否则没法对比
 
 ---
 
