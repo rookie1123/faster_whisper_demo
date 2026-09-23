@@ -151,6 +151,13 @@ def main():
     )
     parser.add_argument("--prompt", default=None, help="可选的 initial_prompt")
     parser.add_argument("--prompt-name", default=None, help="prompts.py 里预置的词表名，如 zh / tech")
+    parser.add_argument("--device", default="cpu", help="cpu 或 cuda")
+    parser.add_argument(
+        "--compute-type",
+        default="int8",
+        help="量化档位：int8 / float16 / int8_float16 / float32。默认 int8，非默认值会写进归档文件名",
+    )
+    parser.add_argument("--beam-size", type=int, default=5, help="束搜索宽度，默认 5")
 
     # 不带任何参数时直接给出帮助：最常见的坑就是忘了传音频和标准答案
     if len(sys.argv) == 1:
@@ -158,6 +165,15 @@ def main():
         return
 
     args = parser.parse_args()
+
+    # CTranslate2 的 CPU 后端不支持 float16，提前给出可读的提示，而不是抛 ValueError
+    if args.device == "cpu" and args.compute_type in ("float16", "int8_float16"):
+        print(
+            f"[错误] CPU 后端不支持 {args.compute_type}。\n"
+            "       CTranslate2 在 CPU 上可行的档位：int8（默认）、int8_float32、float32。\n"
+            "       需要 float16 的话要加 --device cuda，而且得先装好 cuDNN 和 cuBLAS。"
+        )
+        return
 
     if args.prompt_name:
         from prompts import PROMPTS
@@ -190,6 +206,10 @@ def main():
     elif args.prompt:
         prompt_tag = "_prompt-custom"
 
+    # 非默认量化档位写进文件名，方便做 int8 / float16 对照时一眼区分
+    if args.compute_type != "int8":
+        prompt_tag += f"_{args.compute_type}"
+
     report = [
         "# 中文识别评测报告",
         "",
@@ -199,7 +219,8 @@ def main():
         f"- 对比模型: {models_str}",
         f"- 词表(prompt-name): {args.prompt_name or '（未指定）'}",
         f"- initial_prompt: {args.prompt or '（未使用）'}",
-        "- 解码参数: beam_size=5, vad_filter=True, device=cpu, compute_type=int8",
+        f"- 解码参数: beam_size={args.beam_size}, vad_filter=True, "
+        f"device={args.device}, compute_type={args.compute_type}",
         "",
         "> 原始 CER 把「中文数字」和「阿拉伯数字」的写法差异也算作错误；",
         "> 规范化 CER 会先把两边统一成阿拉伯数字再比较，更接近真实识别水平。",
@@ -215,12 +236,12 @@ def main():
             print(f"[跳过] 缺少模型: {model_dir}")
             continue
 
-        model = WhisperModel(str(model_dir), device="cpu", compute_type="int8")
+        model = WhisperModel(str(model_dir), device=args.device, compute_type=args.compute_type)
         t0 = time.time()
         segments, info = model.transcribe(
             str(audio_path),
             language="zh",
-            beam_size=5,
+            beam_size=args.beam_size,
             vad_filter=True,
             initial_prompt=args.prompt,
         )
