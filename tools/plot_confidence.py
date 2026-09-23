@@ -65,6 +65,42 @@ def parse_quantiles(text: str):
     return result
 
 
+def parse_workload(text: str):
+    """解析「总共多少句、多少句有错」，以及最优阈值下「标出多少、其中多少真有错」。"""
+    total = with_error = None
+    match = re.search(r"总句数\s*\|\s*(\d+)\s*（其中\s*(\d+)\s*句含错字）", text)
+    if match:
+        total, with_error = int(match.group(1)), int(match.group(2))
+
+    rows = parse_sweep(text)
+    if not rows or total is None:
+        return None
+
+    best_threshold = max(rows, key=lambda r: r[3])[0]
+    flagged = caught = 0
+    pattern = re.compile(
+        rf"^\|\s*{best_threshold:.2f}\s*\|\s*(\d+)\s*\|[^|]*\|[^|]*\|[^|]*\|", re.M
+    )
+    match = pattern.search(text.replace("**", ""))
+    if match:
+        flagged = int(match.group(1))
+        # 该行第 3 列是「真含错且标出」，单独取
+        row = re.search(
+            rf"^\|\s*{best_threshold:.2f}\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|",
+            text.replace("**", ""), re.M,
+        )
+        if row:
+            flagged, caught = int(row.group(1)), int(row.group(2))
+
+    return {
+        "threshold": best_threshold,
+        "total": total,
+        "with_error": with_error,
+        "flagged": flagged,
+        "caught": caught,
+    }
+
+
 def style(ax):
     ax.grid(axis="y", color=GRID, linewidth=0.8, zorder=0)
     ax.set_axisbelow(True)
@@ -154,6 +190,65 @@ def fig_distribution(quantiles):
     plt.close(fig)
 
 
+def fig_workload(info):
+    """分解条图：通读全部 vs 只看标出的句，省了多少、漏了多少。"""
+    total = info["total"]
+    with_error = info["with_error"]
+    flagged = info["flagged"]
+    caught = info["caught"]
+
+    missed = with_error - caught                 # 漏报：有错却没标
+    false_alarm = flagged - caught               # 误报：标了但没错
+    clean = total - with_error                   # 本来就没错的句子
+    clean_unflagged = clean - false_alarm        # 没标也没错
+
+    rows = [
+        ("全部句子", total, [
+            (with_error, RED, f"{with_error} 句有错"),
+            (clean, "#CBD5E1", f"{clean} 句干净"),
+        ]),
+        ("需要人工看", flagged, [
+            (caught, RED, f"{caught} 句真有错"),
+            (false_alarm, AMBER, f"{false_alarm} 句白看"),
+        ]),
+        ("不用看", total - flagged, [
+            (missed, "#7F1D1D", f"{missed} 句漏掉"),
+            (clean_unflagged, "#CBD5E1", f"{clean_unflagged} 句干净"),
+        ]),
+    ]
+
+    fig, ax = plt.subplots(figsize=(10, 4.4), dpi=160)
+    for y, (label, row_total, segments) in enumerate(rows):
+        left = 0
+        for count, color, text in segments:
+            if count <= 0:
+                continue
+            ax.barh(y, count, left=left, height=0.55, color=color,
+                    edgecolor="white", linewidth=1.5, zorder=3)
+            ax.text(left + count / 2, y, text, ha="center", va="center",
+                    fontsize=11, color="white" if color in (RED, "#7F1D1D") else INK,
+                    zorder=4)
+            left += count
+        ax.text(-1.2, y, f"{label}  {row_total} 句", ha="right", va="center",
+                fontsize=12, color=INK)
+
+    ax.set_xlim(-13, total + 2)
+    ax.set_ylim(-0.7, 2.7)
+    ax.invert_yaxis()
+    ax.axis("off")
+    ax.set_title(
+        f"阈值 {info['threshold']:.2f} 下：通读 38 句变成只看 25 句，漏掉 2 句",
+        fontsize=14, color=INK, pad=18, loc="left",
+    )
+    fig.text(0.01, 0.01,
+             "数据来源：docs/confidence-flagging.md 第 3.1、3.3 节；"
+             "「白看」= 标出来但实际没错，「漏掉」= 真有错却没标出来",
+             fontsize=9, color=MUTED, ha="left")
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    fig.savefig(OUT_DIR / "8_review_workload.png")
+    plt.close(fig)
+
+
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     text = DOC.read_text(encoding="utf-8", errors="ignore")
@@ -171,6 +266,13 @@ def main():
         print("7_word_confidence.png    逐词置信度分布")
     else:
         print("没解析到分位数表")
+
+    info = parse_workload(text)
+    if info and info["flagged"]:
+        fig_workload(info)
+        print("8_review_workload.png   人工复核量的收益")
+    else:
+        print("没解析到复核量数据")
 
     print(f"\n图片目录: {OUT_DIR}")
 
