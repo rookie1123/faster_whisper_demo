@@ -81,21 +81,28 @@ def parse_report(path: Path) -> dict:
 
 
 def classify(name: str):
+    """文件名 -> (说话人, 条件, 跑实验的人)。
+
+    命名规则：<时间戳>_<音频>_<条件>__<跑实验的人>.md
+    """
     stem = re.sub(r"^\d{8}-\d{4,6}_", "", name)
     if not stem.endswith(".md"):
-        return None, None
+        return None, None, None
     stem = stem[:-3]
+    author = None
+    if "__" in stem:
+        stem, author = stem.rsplit("__", 1)
     for speaker in SPEAKERS:
         if stem.startswith(speaker):
             tail = stem[len(speaker):]
             for pattern, label in CONDITION_PATTERNS:
                 if tail == pattern:
-                    return speaker, label
-    return None, None
+                    return speaker, label, author
+    return None, None, None
 
 
 def collect():
-    """{(说话人, 条件): {模型: 指标}}。
+    """返回 ({组合: {模型: 指标}}, {组合: (文件名, 跑实验的人)})。
 
     同一组合可能有多份报告，来自不同的人和不同的机器。跨机器数值有细微差异
     （CPU 指令集不同导致 int8 算子的浮点累加顺序不同），混在一张图里会出现
@@ -103,18 +110,35 @@ def collect():
     """
     candidates = defaultdict(list)
     for path in REPORTS.glob("*.md"):
-        key = classify(path.name)
+        speaker, cond, author = classify(path.name)
+        key = (speaker, cond)
         if key[0] is None:
             continue
         values = parse_report(path)
         if values:
-            candidates[key].append((path.name, values))
+            candidates[key].append((path.name, values, author))
 
-    data = {}
+    data, sources = {}, {}
     for key, items in candidates.items():
         items.sort(key=lambda pair: (len(pair[1]), pair[0]))
-        data[key] = items[-1][1]
-    return data
+        name, values, author = items[-1]
+        data[key] = values
+        sources[key] = (name, author)
+    return data, sources
+
+
+def source_note(sources, keys):
+    """把用到的那批报告归纳成一行出处说明。"""
+    authors = sorted({sources[k][1] for k in keys if k in sources and sources[k][1]})
+    stamps = sorted({sources[k][0][:13] for k in keys if k in sources})
+    who = "、".join(authors) if authors else "未知"
+    when = stamps[0] if stamps else ""
+    return f"数据来源：reports/ 下 {who} 于 {when} 跑出的报告"
+
+
+def stamp(ax, note):
+    """在图底部加一行出处说明。"""
+    ax.figure.text(0.01, 0.005, note, fontsize=9, color=MUTED, ha="left")
 
 
 def style(ax):
@@ -134,7 +158,7 @@ def short(speaker):
 
 
 # --------------------------------------------------------------- 图 1
-def fig_stability(data):
+def fig_stability(data, sources):
     """点图：横轴字错率，纵轴两个模型，每个说话人一个点。"""
     fig, ax = plt.subplots(figsize=(10, 4.6), dpi=160)
     models = [("small", "small（244M）", BLUE), ("tiny", "tiny（39M）", AMBER)]
@@ -176,13 +200,14 @@ def fig_stability(data):
     ax.legend(title="说话人", fontsize=9, title_fontsize=9,
               frameon=False, ncol=5, loc="lower center",
               bbox_to_anchor=(0.5, -0.42))
-    fig.tight_layout()
+    stamp(ax, source_note(sources, [(s, "不加词表") for s in SPEAKERS]))
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
     fig.savefig(OUT_DIR / "1_model_stability.png")
     plt.close(fig)
 
 
 # --------------------------------------------------------------- 图 2
-def fig_slope(data):
+def fig_slope(data, sources):
     """斜率图：每个说话人一条线，三种词表从左到右。"""
     conditions = ["不加词表", "tech 词表", "ml 词表"]
     fig, ax = plt.subplots(figsize=(8.6, 5.6), dpi=160)
@@ -210,13 +235,15 @@ def fig_slope(data):
     style(ax)
     ax.legend(fontsize=10, frameon=False, ncol=5, loc="lower center",
               bbox_to_anchor=(0.5, -0.24))
-    fig.tight_layout()
+    keys = [(s, c) for s in SPEAKERS for c in conditions]
+    stamp(ax, source_note(sources, keys))
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
     fig.savefig(OUT_DIR / "2_vocab_slope.png")
     plt.close(fig)
 
 
 # --------------------------------------------------------------- 图 3
-def fig_heatmap(data):
+def fig_heatmap(data, sources):
     """热力图：行是说话人，列是词表，颜色是字错率。"""
     conditions = ["不加词表", "tech 词表", "ml 词表"]
     rows = []
@@ -245,13 +272,15 @@ def fig_heatmap(data):
     ax.tick_params(which="minor", length=0)
     title(ax, "说话人与词表的字错率矩阵（small 模型，%）")
     fig.colorbar(image, ax=ax, shrink=0.75, label="规范化字错率")
-    fig.tight_layout()
+    keys = [(s, c) for s in SPEAKERS for c in conditions]
+    stamp(ax, source_note(sources, keys))
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
     fig.savefig(OUT_DIR / "3_vocab_heatmap.png")
     plt.close(fig)
 
 
 # --------------------------------------------------------------- 图 4
-def fig_error_composition(data):
+def fig_error_composition(data, sources):
     """堆叠柱状图：替换、漏字、多字三类错误的构成。"""
     fig, ax = plt.subplots(figsize=(9, 5.2), dpi=160)
     groups = [("不加词表", "不加词表"), ("ml 词表", "加 ml 词表")]
@@ -292,13 +321,15 @@ def fig_error_composition(data):
     title(ax, "错误构成：加词表后错误总数减少一半以上")
     style(ax)
     ax.legend(fontsize=10, frameon=False)
-    fig.tight_layout()
+    keys = [(s, c) for s in SPEAKERS for c, _ in groups]
+    stamp(ax, source_note(sources, keys))
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
     fig.savefig(OUT_DIR / "4_error_composition.png")
     plt.close(fig)
 
 
 # --------------------------------------------------------------- 图 5
-def fig_accuracy_speed(data):
+def fig_accuracy_speed(data, sources):
     """散点图：横轴速度倍率，纵轴字错率，理想区在右下。"""
     points = []
     for speaker in SPEAKERS:
@@ -340,7 +371,8 @@ def fig_accuracy_speed(data):
     title(ax, "精度与速度的权衡：换模型比换档位有效得多")
     style(ax)
     ax.grid(axis="x", color=GRID, linewidth=0.8)
-    fig.tight_layout()
+    stamp(ax, f"数据来源：reports/ 下 speaker_fujian 的量化对照报告（{len(quant)} 个模型 × 3 档）")
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
     fig.savefig(OUT_DIR / "5_accuracy_speed.png")
     plt.close(fig)
 
@@ -350,20 +382,20 @@ def main():
     for old in OUT_DIR.glob("*.png"):
         old.unlink()
 
-    data = collect()
+    data, sources = collect()
     if not data:
         print("reports/ 里没有解析到数据")
         return
 
-    fig_stability(data)
+    fig_stability(data, sources)
     print("1_model_stability.png   点图：模型稳定性")
-    fig_slope(data)
+    fig_slope(data, sources)
     print("2_vocab_slope.png       斜率图：词表效果")
-    fig_heatmap(data)
+    fig_heatmap(data, sources)
     print("3_vocab_heatmap.png     热力图：词表矩阵")
-    fig_error_composition(data)
+    fig_error_composition(data, sources)
     print("4_error_composition.png 堆叠柱状图：错误构成")
-    fig_accuracy_speed(data)
+    fig_accuracy_speed(data, sources)
     print("5_accuracy_speed.png    散点图：精度与速度")
     print(f"\n图片目录: {OUT_DIR}")
 
